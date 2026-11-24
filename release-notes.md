@@ -1,0 +1,2 @@
+- The app can now update itself: ⚙ → Check for updates. It also checks once a day.
+- New ⚙ settings button in the main window.

@@ -1,0 +1,55 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $m = Select-String -Path src/WindowGroups.cs -Pattern 'const string Version = "([0-9.]+)"'
+          if (-not $m) { Write-Error "Version not found"; exit 1 }
+          "version=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Check whether this version is already released
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v${{ steps.ver.outputs.version }}" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) { "exists=true" >> $env:GITHUB_OUTPUT } else { "exists=false" >> $env:GITHUB_OUTPUT }
+          exit 0
+
+      - name: Build with the C# compiler built into Windows
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:src\app.ico `
+            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+            /out:WindowGroups.exe src\WindowGroups.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType Directory -Force pkg\WindowGroups | Out-Null
+          Copy-Item WindowGroups.exe, README.md pkg\WindowGroups\
+          Compress-Archive -Path pkg\WindowGroups -DestinationPath WindowGroups.zip -Force
+
+      - name: Publish release
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          gh release create "v$v" WindowGroups.exe WindowGroups.zip --repo "${{ github.repository }}" --title "Window Groups $v" --notes-file release-notes.md
