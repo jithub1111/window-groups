@@ -912,6 +912,16 @@ namespace WindowGroups
             gridBox.CheckedChanged += (s, e) => form.SetGrid(Group, gridBox.Checked);
             Controls.Add(gridBox);
 
+            // one-click minimize / restore for the whole group
+            var minBtn = new FlatButton("Minimize", false) { Size = new Size(74, 26) };
+            var resBtn = new FlatButton("Restore", false) { Size = new Size(70, 26) };
+            new ToolTip().SetToolTip(minBtn, "Minimize every window in this group");
+            new ToolTip().SetToolTip(resBtn, "Bring every window in this group back");
+            minBtn.Click += (s, e) => form.GroupAction(Group, "min");
+            resBtn.Click += (s, e) => form.GroupAction(Group, "restore");
+            minBtn.Enabled = resBtn.Enabled = g.Members.Count > 0;
+            Controls.Add(minBtn); Controls.Add(resBtn);
+
             var add = new FlatButton(picking ? "Cancel" : "+ Add window", !picking) { Size = new Size(104, 28) };
             add.Click += (s, e) => { if (picking) form.CancelPick(); else form.StartPick(Group); };
             Controls.Add(add);
@@ -921,11 +931,8 @@ namespace WindowGroups
             menu.Opening += (s, e) =>
             {
                 menu.Items.Clear();
-                menu.Items.Add("Minimize group", null, (s2, e2) => form.GroupAction(Group, "min"));
-                menu.Items.Add("Restore group", null, (s2, e2) => form.GroupAction(Group, "restore"));
                 if (Group.Grid)
                 {
-                    menu.Items.Add(new ToolStripSeparator());
                     menu.Items.Add("Even out sizes", null, (s2, e2) => form.ResetGrid(Group));
                     var cols = new ToolStripMenuItem("Columns");
                     for (int n = 0; n <= 6; n++)
@@ -937,7 +944,7 @@ namespace WindowGroups
                     menu.Items.Add("Fill the screen", null, (s2, e2) => form.FitToScreen(Group));
                     menu.Items.Add("Re-fit around windows", null, (s2, e2) => form.RefitGrid(Group));
                 }
-                menu.Items.Add(new ToolStripSeparator());
+                if (Group.Grid) menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("Rename…", null, (s2, e2) => form.RenameGroup(Group));
                 menu.Items.Add("Delete group", null, (s2, e2) => form.DeleteGroup(Group));
                 e.Cancel = false;
@@ -950,23 +957,40 @@ namespace WindowGroups
             {
                 more.Location = new Point(Width - Pad - more.Width, Pad + 2);
                 add.Location = new Point(more.Left - 6 - add.Width, Pad + 2);
+                resBtn.Location = new Point(Width - Pad - resBtn.Width, Height - Pad - 25);
+                minBtn.Location = new Point(resBtn.Left - 6 - minBtn.Width, Height - Pad - 25);
                 LayoutRows();
             };
 
             int y = HeaderH + Pad;
-            foreach (var m in g.Members)
+            for (int i = 0; i < g.Members.Count; i++)
             {
-                var mm = m;
-                var x = new Label
+                var mm = g.Members[i];
+                Controls.Add(RowButton("✕", "Remove from group", y, 26, () => form.RemoveMember(Group, mm)));
+                if (g.Grid)
                 {
-                    Text = "✕", AutoSize = false, Size = new Size(22, 22), TextAlign = ContentAlignment.MiddleCenter,
-                    ForeColor = Theme.Muted, Cursor = Cursors.Hand, Tag = y, BackColor = Theme.Card
-                };
-                new ToolTip().SetToolTip(x, "Remove from group");
-                x.Click += (s, e) => form.RemoveMember(Group, mm);
-                Controls.Add(x);
+                    // move this window earlier/later in the grid (swaps places with its neighbour)
+                    if (i > 0) Controls.Add(RowButton("▲", "Move up in the grid (swap with the one above)", y, 52, () => form.MoveMember(Group, mm, -1)));
+                    if (i < g.Members.Count - 1) Controls.Add(RowButton("▼", "Move down in the grid (swap with the one below)", y, 76, () => form.MoveMember(Group, mm, +1)));
+                }
                 y += RowH;
             }
+        }
+
+        // small clickable symbol at the right end of a window row; xFromRight says how far from the edge
+        Label RowButton(string text, string tip, int y, int xFromRight, Action click)
+        {
+            var l = new Label
+            {
+                Text = text, AutoSize = false, Size = new Size(22, 22), TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Theme.Muted, Cursor = Cursors.Hand, Tag = new Point(xFromRight, y), BackColor = Theme.Card,
+                Font = new Font("Segoe UI Symbol", text == "✕" ? 9f : 8f)
+            };
+            new ToolTip().SetToolTip(l, tip);
+            l.Click += (s, e) => click();
+            l.MouseEnter += (s, e) => l.ForeColor = Theme.Accent;
+            l.MouseLeave += (s, e) => l.ForeColor = Theme.Muted;
+            return l;
         }
 
         Member RowAt(int y)
@@ -979,7 +1003,7 @@ namespace WindowGroups
         void LayoutRows()
         {
             foreach (Control c in Controls)
-                if (c is Label && c.Tag is int) c.Location = new Point(Width - Pad - 26, (int)c.Tag + 2);
+                if (c is Label && c.Tag is Point) { var t = (Point)c.Tag; c.Location = new Point(Width - Pad - t.X, t.Y + 2); }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1008,22 +1032,16 @@ namespace WindowGroups
             int open = Group.Members.Count(m => m.Open);
             string sub = Group.Members.Count == 0 ? "No windows yet" :
                 Group.Members.Count + (Group.Members.Count == 1 ? " window" : " windows") + (open < Group.Members.Count ? ", " + open + " open" : "");
-            using (var f = new Font("Segoe UI", 8.5f)) using (var b = new SolidBrush(Theme.Muted))
-                g.DrawString(sub, f, b, Pad + 36, Pad + 19);
+            if (Group.Grid && open > 0) { int gc, gr; Engine.Dims(Group, open, out gc, out gr); sub += " · " + gc + "×" + gr + " grid"; }
+            using (var f = new Font("Segoe UI", 8.5f))
+                TextRenderer.DrawText(g, sub, f, new Rectangle(Pad + 34, Pad + 19, Math.Max(40, Width - 156 - (Pad + 34) - 4), 18), Theme.Muted,
+                    TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
             using (var p = new Pen(Theme.Border)) g.DrawLine(p, Pad, HeaderH + 4, Width - Pad, HeaderH + 4);
 
             // footer: grid checkbox lives here
             int fy = Height - Pad - FooterH + 4;
             using (var p = new Pen(Theme.Border)) g.DrawLine(p, Pad, fy, Width - Pad, fy);
-            if (Group.Grid)
-            {
-                int cols, rows; Engine.Dims(Group, Math.Max(1, open), out cols, out rows);
-                var hint = new Rectangle(Pad + 104, Height - Pad - 22, Width - Pad * 2 - 104, 20);
-                using (var f = new Font("Segoe UI", 8f))
-                    TextRenderer.DrawText(g, cols + " × " + rows + " grid · drag any window to move all", f, hint, Theme.Muted,
-                        TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
-            }
 
             int y = HeaderH + Pad;
             if (Group.Members.Count == 0)
@@ -1032,11 +1050,22 @@ namespace WindowGroups
                     g.DrawString(picking ? "Now click the window you want to add…" : "Click “+ Add window”, then click any window.", f, b, Pad, y + 4);
                 return;
             }
+            int slot = 0;
             foreach (var m in Group.Members)
             {
+                int x0 = Pad;
+                if (Group.Grid)
+                {
+                    // grid spot number (open windows fill the grid in list order)
+                    string num = m.Open ? (++slot).ToString() : "–";
+                    using (var f = new Font("Segoe UI", 8f, FontStyle.Bold))
+                        TextRenderer.DrawText(g, num, f, new Rectangle(x0, y + 4, 16, 18), color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    x0 += 20;
+                }
                 var icon = form.IconFor(m.ExePath);
-                if (icon != null) g.DrawIcon(icon, new Rectangle(Pad, y + 4, 16, 16));
-                var textRect = new Rectangle(Pad + 24, y + 4, Width - Pad * 2 - 24 - 30, 18);
+                if (icon != null) g.DrawIcon(icon, new Rectangle(x0, y + 4, 16, 16));
+                int rightSpace = Group.Grid ? 82 : 30;
+                var textRect = new Rectangle(x0 + 24, y + 4, Width - Pad - (x0 + 24) - rightSpace, 18);
                 using (var f = new Font("Segoe UI", 9f)) using (var b = new SolidBrush(m.Open ? Theme.Text : Theme.Muted))
                     TextRenderer.DrawText(g, m.Open ? m.Title : m.Title + "  (not open · click to link)", f, textRect, m.Open ? Theme.Text : Theme.Muted,
                         TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
@@ -1336,6 +1365,15 @@ namespace WindowGroups
             engine.Groups.Remove(g); engine.Save(); Rebuild();
         }
 
+        public void MoveMember(Group g, Member m, int delta)
+        {
+            int i = g.Members.IndexOf(m), j = i + delta;
+            if (i < 0 || j < 0 || j >= g.Members.Count) return;
+            g.Members[i] = g.Members[j]; g.Members[j] = m;
+            engine.Tile(g); engine.Save(); Rebuild();
+            SetStatus("Swapped places in " + Label(g) + ".");
+        }
+
         public void RemoveMember(Group g, Member m) { g.Members.Remove(m); engine.Tile(g); engine.Save(); Rebuild(); }
 
         // ---- grids ----
@@ -1497,7 +1535,7 @@ namespace WindowGroups
     // ------------------------------------------------------------------
     static class Updater
     {
-        public const string Version = "1.5.0";
+        public const string Version = "1.6.0";
         public const string Repo = "jithub1111/window-groups";
 
         public class Release { public Version Ver; public string Tag, ExeUrl, Notes; }

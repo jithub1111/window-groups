@@ -1,2 +1,2 @@
-- The app can now update itself: ⚙ → Check for updates. It also checks once a day.
-- New ⚙ settings button in the main window.
+- Each group now has one-click Minimize and Restore buttons.
+- Grids: use the ▲ ▼ arrows next to a window to swap it with its neighbour. Numbers show each window's spot in the grid.

@@ -18,7 +18,7 @@ The first time, Windows may show "Windows protected your PC" because the app isn
 
 1. Click **+ Add window** on a group, then click the window you want. It joins the group. Repeat for each window.
 2. Minimize any window in the group: the others follow. Restore it: they all come back.
-3. **+ New group** adds group B, C, and so on. The **•••** button on a group lets you minimize or restore the whole group, rename it, or delete it. The **✕** next to a window removes it from the group.
+3. **+ New group** adds group B, C, and so on. Each group has one-click **Minimize** and **Restore** buttons for the whole group. The **•••** button lets you rename or delete it, plus grid options. The **✕** next to a window removes it from the group.
 4. The green **On** button pauses or resumes linking.
 
 ## After a restart
@@ -42,7 +42,7 @@ Tick **Enable grid** on a group to lock its windows together into a grid. It wor
 - **Resize the whole grid:** drag an outer edge or corner of the grid.
 - **Resize inside the grid:** drag the edge between two windows and the neighbours adjust.
 - **Odd numbers keep their shape:** with 3 windows in a 2 × 2 grid (or 5 in a 3 × 2), the leftover window stays the same size as the others and the spot next to it stays empty. Drag its edge into the empty spot to stretch it across; drag it back to shrink it again.
-- **Swap two windows:** hold **Shift** while dragging a window, and drop it on another window's spot.
+- **Swap windows:** use the **▲ ▼** arrows next to a window in the app to move it to an earlier or later spot in the grid (the numbers show each window's spot). Or hold **Shift** while dragging a window and drop it on another window's spot.
 - **Minimize/restore** still works for the whole grid. Maximizing one grid window enlarges just that one; un-maximize it and it snaps back into place.
 - The **•••** menu has **Even out sizes**, **Columns** (1 to 6, or automatic), **Fill the screen**, and **Re-fit around windows**.
 - Adding, removing, opening or closing a window rearranges the grid inside the same area. Its position and size are saved.
