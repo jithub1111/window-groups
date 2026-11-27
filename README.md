@@ -49,7 +49,7 @@ Tick **Enable grid** on a group to lock its windows together into a grid. It wor
 - The **•••** menu has **Even out sizes**, **Columns** (1 to 6, or automatic), **Fill the screen**, and **Re-fit around windows**.
 - Adding, removing, opening or closing a window rearranges the grid inside the same area. Its position and size are saved.
 
-Closing the window keeps the app running in the system tray (bottom-right, near the clock). Right-click the tray icon to reopen it, pause, turn maximize linking on or off, make it **Start with Windows**, or **Exit**.
+Closing the window keeps the app running in the system tray (bottom-right, near the clock). To bring it back, just click the app's icon again (taskbar, Start menu or desktop shortcut) or click the tray icon. Right-click the tray icon to reopen it, pause, turn maximize linking on or off, make it **Start with Windows**, or **Exit**.
 
 Your groups are saved. When you open the app again, it finds the same windows automatically (same program and title, or the only open window of that program).
 

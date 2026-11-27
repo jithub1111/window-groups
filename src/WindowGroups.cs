@@ -1252,7 +1252,8 @@ namespace WindowGroups
             menu.Items.AddRange(new ToolStripItem[] { updateItem, autoUpdateItem, logItem, versionItem, new ToolStripSeparator() });
             menu.Items.Add("Exit", null, (s, e) => ExitApp());
             tray = new NotifyIcon { Icon = Theme.MakeIcon(16), Text = "Window Groups", ContextMenuStrip = menu, Visible = true };
-            tray.DoubleClick += (s, e) => ShowMain();
+            tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
+            ListenForShowRequests();
 
             // engine
             engine.Load();
@@ -1516,9 +1517,29 @@ namespace WindowGroups
         // ---- tray / startup ----
         void ShowMain()
         {
-            allowVisible = true; Show();
+            allowVisible = true; ShowInTaskbar = true; Show();
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
             Activate();
+            Native.SetForegroundWindow(Handle);
+        }
+
+        // Another launch of the app (taskbar/Start/desktop icon) signals this event to bring us up.
+        public const string ShowEventName = "WindowGroups.ShowWindow";
+        EventWaitHandle showEvent;
+
+        void ListenForShowRequests()
+        {
+            try { showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName); }
+            catch { return; }
+            var t = new Thread(() =>
+            {
+                while (true)
+                {
+                    try { showEvent.WaitOne(); } catch { return; }
+                    try { BeginInvoke((Action)ShowMain); } catch { }
+                }
+            }) { IsBackground = true, Name = "ShowRequests" };
+            t.Start();
         }
 
         // ---- updates ----
@@ -1633,7 +1654,7 @@ namespace WindowGroups
     // ------------------------------------------------------------------
     static class Updater
     {
-        public const string Version = "1.7.0";
+        public const string Version = "1.7.1";
         public const string Repo = "jithub1111/window-groups";
 
         public class Release { public Version Ver; public string Tag, ExeUrl, Notes; }
@@ -1690,6 +1711,8 @@ namespace WindowGroups
 
     static class Program
     {
+        [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int pid);
+
         [STAThread]
         static void Main(string[] args)
         {
@@ -1703,7 +1726,13 @@ namespace WindowGroups
                 }
                 if (!created)
                 {
-                    MessageBox.Show("Window Groups is already running. Look for its icon in the tray.", "Window Groups");
+                    // Already running (e.g. hidden in the tray): ask that copy to show its window, then quit.
+                    try
+                    {
+                        AllowSetForegroundWindow(-1);
+                        using (var ev = EventWaitHandle.OpenExisting(MainForm.ShowEventName)) ev.Set();
+                    }
+                    catch { MessageBox.Show("Window Groups is already running. Look for its icon in the tray.", "Window Groups"); }
                     return;
                 }
                 Application.EnableVisualStyles();
