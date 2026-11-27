@@ -1,2 +1,5 @@
-- Each group now has one-click Minimize and Restore buttons.
-- Grids: use the ▲ ▼ arrows next to a window to swap it with its neighbour. Numbers show each window's spot in the grid.
+- Fixed: windows that start minimized after a restart (like Opera's) weren't recognised. They're now matched using where they sit when restored.
+- Fixed: windows from programs whose name Windows won't share were never re-linked.
+- Linking by hand is quicker: after you link one "not open" entry, it goes straight on to the next.
+- If the app isn't set to start with Windows, it now asks once (it must be running when your windows come back).
+- New: ⚙ → Show diagnostics log, to help track down linking problems.

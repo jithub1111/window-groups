@@ -29,7 +29,9 @@ Window Groups remembers your groups when the PC is shut down and turned back on:
 - It **reopens grouped apps** that aren't running about 8 seconds after you sign in, giving apps that start by themselves a head start. Turn this off with **Reopen my apps after restart** in the tray menu, or use **Open missing apps now** whenever you want.
 - It **finds the windows again**, whether they reopen by themselves or you open them by hand. It goes by program, window type, where the window sits on screen, and its title, so it still works when titles change (like live prices).
 - Each window goes **back where it was**. Grids are rebuilt in the same place and size.
-- If it ever links the wrong window, or one stays "not open": **click the "not open" entry, then click the right window**. To fix an entry that's linked to the wrong window, **right-click it → Link to a different window**.
+- Windows that come back **minimized** (Opera does this) are recognised too, using where they sit when restored, so one click on **Restore** brings the group back.
+- If it ever links the wrong window, or some stay "not open": **click the first "not open" entry, then click the right window**. It moves straight on to the next one, so you can fix a whole group in a few clicks. To fix an entry linked to the wrong window, **right-click it → Link to a different window**.
+- Still not working? **⚙ → Show diagnostics log** opens the folder with `log.txt`, which records what the app saw and why it did or didn't link each window. Send that file to whoever is helping you.
 
 Note: apps like browsers reopen their last tabs only if they're set to do so (in Chrome: Settings → On startup → Continue where you left off). Folders in File Explorer aren't reopened.
 

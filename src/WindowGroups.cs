@@ -93,6 +93,29 @@ namespace WindowGroups
             SetWindowPos(h, IntPtr.Zero, r.Left - l, r.Top - t, r.W + l + rr, r.H + t + b, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         }
 
+        [StructLayout(LayoutKind.Sequential)] public struct WINDOWPLACEMENT { public int length, flags, showCmd; public POINT ptMin, ptMax; public RECT rcNormal; }
+        [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr h, ref WINDOWPLACEMENT wp);
+        [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
+
+        // Where a window sits when it's a normal window, even while it's minimized or maximized.
+        public static RECT NormalRect(IntPtr h)
+        {
+            if (!IsIconic(h) && !IsZoomed(h)) return VisibleRect(h);
+            var wp = new WINDOWPLACEMENT { length = Marshal.SizeOf(typeof(WINDOWPLACEMENT)) };
+            if (!GetWindowPlacement(h, ref wp)) return new RECT();
+            var r = wp.rcNormal; // "workspace" coordinates: relative to the work area of its monitor
+            var mi = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+            if (GetMonitorInfo(MonitorFromWindow(h, 2), ref mi))
+            {
+                int dx = mi.rcWork.Left - mi.rcMonitor.Left, dy = mi.rcWork.Top - mi.rcMonitor.Top;
+                r.Left += dx; r.Right += dx; r.Top += dy; r.Bottom += dy;
+            }
+            int b = 7;
+            try { b = (int)Math.Round(7 * GetDpiForWindow(h) / 96.0); } catch { }
+            r.Left += b; r.Right -= b; r.Bottom -= b; // drop the invisible resize border
+            return r;
+        }
+
         public static List<RECT> MonitorWorkAreas()
         {
             var list = new List<RECT>();
@@ -248,11 +271,11 @@ namespace WindowGroups
         // Remember where a window sits (only while it's a normal window, not minimized/maximized).
         bool RememberRect(Member m)
         {
-            if (!m.Open || Native.IsIconic(m.Hwnd) || Native.IsZoomed(m.Hwnd)) return false;
+            if (!m.Open) return false;
             IntPtr ctx = Native.EnterDpiAware();
             try
             {
-                var r = Native.VisibleRect(m.Hwnd);
+                var r = Native.NormalRect(m.Hwnd); // works for minimized windows too
                 if (r.W <= 0 || r.H <= 0 || (r.Left == m.L && r.Top == m.T && r.Right == m.R && r.Bottom == m.B)) return false;
                 m.L = r.Left; m.T = r.Top; m.R = r.Right; m.B = r.Bottom;
                 return true;
@@ -298,6 +321,35 @@ namespace WindowGroups
         }
 
         public bool PositionsChanged;
+        string lastDiagKey = "";
+
+        static bool SameProgram(Member m, Cand w)
+        {
+            bool memberKnown = m.ExePath.Length > 0, windowKnown = w.Exe.Length > 0;
+            if (memberKnown && windowKnown) return string.Equals(w.Exe, m.ExeName, StringComparison.OrdinalIgnoreCase);
+            return m.ClassName.Length > 0 && w.Class == m.ClassName; // program name unknown: go by window type
+        }
+
+        // ---- diagnostics log: %APPDATA%\WindowGroups\log.txt ----
+        public static readonly string LogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowGroups", "log.txt");
+
+        public static void Log(string text)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(LogPath));
+                var fi = new FileInfo(LogPath);
+                if (fi.Exists && fi.Length > 400000)
+                {
+                    var old = LogPath.Replace("log.txt", "log.old.txt");
+                    if (File.Exists(old)) File.Delete(old);
+                    File.Move(LogPath, old);
+                }
+                File.AppendAllText(LogPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + text + "\r\n", Encoding.UTF8);
+            }
+            catch { }
+        }
         readonly Dictionary<IntPtr, int> firstSeen = new Dictionary<IntPtr, int>();
 
         class Cand { public IntPtr Hwnd; public string Title, Exe, Class; public Native.RECT Rect; public bool Settled; }
@@ -330,7 +382,7 @@ namespace WindowGroups
             foreach (var g in Groups)
                 foreach (var m in g.Members)
                 {
-                    if (m.Open && !Native.IsWindow(m.Hwnd)) { m.Hwnd = IntPtr.Zero; changed.Add(g); }
+                    if (m.Open && !Native.IsWindow(m.Hwnd)) { Log("Window closed: \"" + m.Title + "\" (group " + g.Name + ")"); m.Hwnd = IntPtr.Zero; changed.Add(g); }
                     else if (m.Open)
                     {
                         var t = Native.Title(m.Hwnd); if (t.Length > 0) m.Title = t;
@@ -354,7 +406,7 @@ namespace WindowGroups
                         wins.Add(new Cand
                         {
                             Hwnd = h, Title = Native.Title(h), Exe = Path.GetFileName(Native.ExePath(Native.Pid(h))), Class = Native.ClassOf(h),
-                            Rect = Native.VisibleRect(h), Settled = nowTick - seen > 4000
+                            Rect = Native.NormalRect(h), Settled = nowTick - seen > 4000
                         });
                     }
                 }
@@ -362,14 +414,16 @@ namespace WindowGroups
                 if (firstSeen.Count > 500) { var alive = new HashSet<IntPtr>(wins.Select(w => w.Hwnd)); foreach (var k in firstSeen.Keys.Where(k => !alive.Contains(k)).ToList()) firstSeen.Remove(k); }
 
                 // Score every (remembered entry, open window) pair of the same program, then hand out best first.
+                var diag = new List<string>();
                 var pairs = new List<Tuple<int, Tuple<Group, Member>, Cand>>();
                 foreach (var gm in missing)
                 {
                     var m = gm.Item2;
-                    var same = wins.Where(w => string.Equals(w.Exe, m.ExeName, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var same = wins.Where(w => SameProgram(m, w)).ToList();
                     if (same.Count == 0) continue;
                     // Windows of the same program and type, compared with how many entries of that program are waiting.
                     int waiting = missing.Count(x => string.Equals(x.Item2.ExeName, m.ExeName, StringComparison.OrdinalIgnoreCase));
+                    var lines = new List<string>();
                     foreach (var w in same)
                     {
                         bool sameType = m.ClassName.Length == 0 || w.Class == m.ClassName;
@@ -381,7 +435,12 @@ namespace WindowGroups
                         bool strong = score >= 45;                                    // title and/or position clearly agree
                         bool onlyChoices = sameType && w.Settled && sameTypeCount <= waiting; // every such window is one of ours
                         if (strong || onlyChoices) pairs.Add(Tuple.Create(score + (sameType ? 20 : 0), gm, w));
+                        lines.Add("    candidate \"" + w.Title + "\" " + Native.State(w.Hwnd) + " at " + w.Rect.Left + "," + w.Rect.Top + " " + w.Rect.W + "x" + w.Rect.H +
+                            " score=" + (score - pos) + " pos=" + pos + (sameType ? "" : " other-type") + (w.Settled ? "" : " new") + (strong || onlyChoices ? " OK" : ""));
                     }
+                    diag.Add("  waiting: \"" + m.Title + "\" (" + m.ExeName + ", group " + gm.Item1.Name + ") saved at " + m.L + "," + m.T + " " + (m.R - m.L) + "x" + (m.B - m.T) +
+                        ", " + same.Count + " window(s) of that program, " + waiting + " entries waiting");
+                    diag.AddRange(lines.Take(12));
                 }
                 var used = new HashSet<Member>();
                 foreach (var p in pairs.OrderByDescending(x => x.Item1))
@@ -394,6 +453,14 @@ namespace WindowGroups
                     lastState[w.Hwnd] = Native.State(w.Hwnd);
                     changed.Add(g);
                     if (!g.Grid) PutBack(m);
+                    diag.Add("  LINKED \"" + m.Title + "\" (group " + g.Name + ") <- \"" + w.Title + "\" score " + p.Item1);
+                }
+                // Log only when the picture changes, so the log stays readable.
+                string key = string.Join("|", diag.Where(l => !l.StartsWith("  LINKED")).Select(l => Regex.Replace(l, " (new|score=\\d+|pos=\\d+)", "")));
+                if (key != lastDiagKey || diag.Any(l => l.StartsWith("  LINKED")))
+                {
+                    lastDiagKey = key;
+                    if (diag.Count > 0) Log("Re-linking check:\r\n" + string.Join("\r\n", diag));
                 }
             }
             return changed.Where(g => g.Grid).ToList();
@@ -730,6 +797,7 @@ namespace WindowGroups
                 sb.AppendLine("option\tsyncmax\t" + (SyncMaximize ? "1" : "0"));
                 sb.AppendLine("option\treopen\t" + (ReopenApps ? "1" : "0"));
                 sb.AppendLine("option\tautoupdate\t" + (AutoUpdate ? "1" : "0"));
+                sb.AppendLine("option\taskedstartup\t" + (AskedStartup ? "1" : "0"));
                 sb.AppendLine("option\tlastcheck\t" + Clean(LastUpdateCheck));
                 foreach (var g in Groups)
                 {
@@ -746,6 +814,7 @@ namespace WindowGroups
 
         public bool ReopenApps = true;
         public bool AutoUpdate = true;
+        public bool AskedStartup;
         public string LastUpdateCheck = "";
         public bool FirstRun;
 
@@ -781,6 +850,7 @@ namespace WindowGroups
                     if (p[0] == "option" && p.Length > 2 && p[1] == "syncmax") SyncMaximize = p[2] == "1";
                     else if (p[0] == "option" && p.Length > 2 && p[1] == "reopen") ReopenApps = p[2] == "1";
                     else if (p[0] == "option" && p.Length > 2 && p[1] == "autoupdate") AutoUpdate = p[2] == "1";
+                    else if (p[0] == "option" && p.Length > 2 && p[1] == "askedstartup") AskedStartup = p[2] == "1";
                     else if (p[0] == "option" && p.Length > 2 && p[1] == "lastcheck") LastUpdateCheck = p[2];
                     else if (p[0] == "group" && p.Length > 1)
                     {
@@ -1170,7 +1240,16 @@ namespace WindowGroups
             updateItem = new ToolStripMenuItem("Check for updates…", null, (s, e) => CheckForUpdates(true));
             autoUpdateItem = new ToolStripMenuItem("Check for updates automatically", null, (s, e) => { engine.AutoUpdate = !engine.AutoUpdate; autoUpdateItem.Checked = engine.AutoUpdate; engine.Save(); });
             var versionItem = new ToolStripMenuItem("Version " + Updater.Version) { Enabled = false };
-            menu.Items.AddRange(new ToolStripItem[] { updateItem, autoUpdateItem, versionItem, new ToolStripSeparator() });
+            var logItem = new ToolStripMenuItem("Show diagnostics log", null, (s, e) =>
+            {
+                try
+                {
+                    if (!File.Exists(Engine.LogPath)) Engine.Log("Log opened");
+                    Process.Start("explorer.exe", "/select,\"" + Engine.LogPath + "\"");
+                }
+                catch { }
+            });
+            menu.Items.AddRange(new ToolStripItem[] { updateItem, autoUpdateItem, logItem, versionItem, new ToolStripSeparator() });
             menu.Items.Add("Exit", null, (s, e) => ExitApp());
             tray = new NotifyIcon { Icon = Theme.MakeIcon(16), Text = "Window Groups", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += (s, e) => ShowMain();
@@ -1183,6 +1262,18 @@ namespace WindowGroups
             engine.GridChanged += () => RebuildIfChanged();
             engine.Start();
             maxItem.Checked = engine.SyncMaximize;
+            Engine.Log("Window Groups " + Updater.Version + " started" + (startHidden ? " (with Windows)" : "") + ", start-with-Windows " + (IsStartupOn() ? "on" : "OFF") +
+                ", " + engine.Groups.Sum(x => x.Members.Count) + " remembered windows, " + engine.Groups.Sum(x => x.Members.Count(m => m.Open)) + " found right away");
+            if (!engine.FirstRun && !IsStartupOn() && !engine.AskedStartup)
+            {
+                engine.AskedStartup = true;
+                Engine.Later(1500, () =>
+                {
+                    if (MessageBox.Show(this, "Window Groups isn't set to start with Windows, so after a restart it isn't running when your windows come back and can't link them.\n\nStart it with Windows from now on?",
+                        "Window Groups", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) SetStartup(true);
+                    engine.Save();
+                });
+            }
             if (engine.FirstRun && !IsStartupOn()) ToggleStartup();   // remember groups across restarts out of the box
             else if (IsStartupOn()) SetStartup(true);                   // keep the path right if the exe was moved
             startupItem.Checked = IsStartupOn();
@@ -1324,8 +1415,15 @@ namespace WindowGroups
                 engine.Relink(g, relink, fg);
                 engine.Tile(g);
                 Rebuild();
-                SetStatus("Linked “" + Native.Title(fg) + "” in " + Label(g) + ".");
                 Native.SetForegroundWindow(Handle);
+                // go straight on to the next entry that still needs its window
+                var next = g.Members.FirstOrDefault(x => !x.Open);
+                if (next != null)
+                {
+                    StartRelink(g, next);
+                    SetStatus("Linked. Now click “" + next.Title + "” (or Cancel to stop).");
+                }
+                else SetStatus("All windows in " + Label(g) + " are linked.");
                 return;
             }
             engine.AddWindow(g, fg);
@@ -1535,7 +1633,7 @@ namespace WindowGroups
     // ------------------------------------------------------------------
     static class Updater
     {
-        public const string Version = "1.6.0";
+        public const string Version = "1.7.0";
         public const string Repo = "jithub1111/window-groups";
 
         public class Release { public Version Ver; public string Tag, ExeUrl, Notes; }
